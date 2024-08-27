@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::ffi::OsString;
 use std::fmt::Display;
 use std::fmt::Write;
@@ -132,7 +133,7 @@ pub(crate) async fn run(
     let executable = target.executable();
 
     // Construct the command
-    let mut process = Command::new(executable);
+    let mut process = Command::new(&*executable);
     process.args(args);
 
     // Construct the `PATH` environment variable.
@@ -161,7 +162,7 @@ pub(crate) async fn run(
     // We check if the provided command is not part of the executables for the `from` package.
     // If the command is found in other packages, we warn the user about the correct package to use.
     warn_executable_not_provided_by_package(
-        executable,
+        &executable,
         &from.name,
         &site_packages,
         invocation_source,
@@ -348,13 +349,26 @@ impl<'a> Target<'a> {
     }
 
     /// Returns the name of the executable.
-    fn executable(&self) -> &str {
-        match self {
+    fn executable(&self) -> Cow<str> {
+        let name = match self {
             Self::Unspecified(name) => name,
             Self::Version(name, _) => name,
             Self::Latest(name) => name,
             Self::UserDefined(name, _) => name,
+        };
+
+        // On Unix, we don't need to deal with an extension
+        if !cfg!(windows) {
+            return Cow::Borrowed(name);
         }
+
+        // On Windows, if we have an extension we won't also add `.exe`
+        if std::path::Path::new(name).extension().is_some() {
+            return Cow::Borrowed(name);
+        }
+
+        // Otherwise, we ensure `.exe` is present
+        Cow::Owned(format!("{name}.exe"))
     }
 
     /// Returns `true` if the target is `latest`.
