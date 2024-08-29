@@ -1610,10 +1610,11 @@ impl PipCheckSettings {
 pub(crate) struct VenvSettings {
     pub(crate) seed: bool,
     pub(crate) allow_existing: bool,
-    pub(crate) name: PathBuf,
+    pub(crate) path: Option<PathBuf>,
     pub(crate) prompt: Option<String>,
     pub(crate) system_site_packages: bool,
     pub(crate) relocatable: bool,
+    pub(crate) no_project: bool,
     pub(crate) settings: PipSettings,
 }
 
@@ -1626,7 +1627,7 @@ impl VenvSettings {
             no_system,
             seed,
             allow_existing,
-            name,
+            path,
             prompt,
             system_site_packages,
             relocatable,
@@ -1635,6 +1636,7 @@ impl VenvSettings {
             keyring_provider,
             allow_insecure_host,
             exclude_newer,
+            no_project,
             link_mode,
             compat_args: _,
         } = args;
@@ -1642,9 +1644,10 @@ impl VenvSettings {
         Self {
             seed,
             allow_existing,
-            name,
+            path,
             prompt,
             system_site_packages,
+            no_project,
             relocatable,
             settings: PipSettings::combine(
                 PipOptions {
