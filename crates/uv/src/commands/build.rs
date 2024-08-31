@@ -13,7 +13,7 @@ use uv_cache::Cache;
 use uv_client::{BaseClientBuilder, Connectivity, FlatIndexClient, RegistryClientBuilder};
 use uv_configuration::{BuildKind, Concurrency};
 use uv_dispatch::BuildDispatch;
-use uv_fs::CWD;
+use uv_fs::{Simplified, CWD};
 use uv_python::{
     EnvironmentPreference, PythonDownloads, PythonEnvironment, PythonInstallation,
     PythonPreference, PythonRequest, PythonVersionFile, VersionRequest,
@@ -227,14 +227,49 @@ async fn build_impl(
 
     // Determine the build plan from the command-line arguments.
     let path = path.unwrap_or_else(|| &*CWD);
-    let output_dir = path.join("dist");
+    let metadata = match fs_err::tokio::metadata(path).await {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Err(anyhow::anyhow!(
+                "Source `{}` does not exist",
+                path.user_display()
+            ));
+        }
+        Err(err) => return Err(err.into()),
+    };
+
+    // Create the output directory.
+    let output_dir = if metadata.is_dir() {
+        path.join("dist")
+    } else {
+        path.parent().unwrap().to_path_buf()
+    };
     fs_err::tokio::create_dir_all(&output_dir).await?;
 
-    let plan = match (sdist, wheel) {
-        (false, false) => BuildPlan::SdistToWheel,
-        (true, false) => BuildPlan::Sdist,
-        (false, true) => BuildPlan::Wheel,
-        (true, true) => BuildPlan::SdistAndWheel,
+    // Determine the build plan.
+    let plan = if metadata.is_dir() {
+        // We're building from a directory.
+        match (sdist, wheel) {
+            (false, false) => BuildPlan::SdistToWheel,
+            (false, true) => BuildPlan::Wheel,
+            (true, false) => BuildPlan::Sdist,
+            (true, true) => BuildPlan::SdistAndWheel,
+        }
+    } else {
+        // We're building from a file, which must be a source distribution.
+        match (sdist, wheel) {
+            (false, true) => BuildPlan::WheelFromSdist,
+            (false, false) => {
+                return Err(anyhow::anyhow!(
+                    "Pass `--wheel` explicitly to build a wheel from a source distribution"
+                ));
+            }
+            (true, _) => {
+                return Err(anyhow::anyhow!(
+                    "Building an `--sdist` from a source distribution is not supported"
+                ));
+            }
+        }
     };
 
     // Prepare some common arguments for the build.
@@ -253,7 +288,9 @@ async fn build_impl(
             // Extract the source distribution into a temporary directory.
             let path = output_dir.join(&sdist);
             let reader = fs_err::tokio::File::open(&path).await?;
-            let ext = SourceDistExtension::from_path(&path)?;
+            let ext = SourceDistExtension::from_path(path.as_path()).map_err(|err| {
+                anyhow::anyhow!("`{}` is not a valid source distribution, as it ends with an unsupported extension. Expected one of: {err}.", path.user_display())
+            })?;
             let temp_dir = tempfile::tempdir_in(&output_dir)?;
             uv_extract::stream::archive(reader, ext, temp_dir.path()).await?;
 
@@ -307,6 +344,36 @@ async fn build_impl(
 
             BuiltDistributions::Both(sdist, wheel)
         }
+        BuildPlan::WheelFromSdist => {
+            // Extract the source distribution into a temporary directory.
+            let reader = fs_err::tokio::File::open(path).await?;
+            let ext = SourceDistExtension::from_path(path).map_err(|err| {
+                anyhow::anyhow!("`{}` is not a valid build source. Expected to receive a source directory, or a source distribution ending in one of: {err}.", path.user_display())
+            })?;
+            let temp_dir = tempfile::tempdir_in(&output_dir)?;
+            uv_extract::stream::archive(reader, ext, temp_dir.path()).await?;
+
+            // Extract the top-level directory from the archive.
+            let extracted = match uv_extract::strip_component(temp_dir.path()) {
+                Ok(top_level) => top_level,
+                Err(uv_extract::Error::NonSingularArchive(_)) => temp_dir.path().to_path_buf(),
+                Err(err) => return Err(err.into()),
+            };
+
+            // Build a wheel from the source distribution.
+            let builder = build_dispatch
+                .setup_build(
+                    &extracted,
+                    subdirectory,
+                    &version_id,
+                    dist,
+                    BuildKind::Wheel,
+                )
+                .await?;
+            let wheel = builder.build(&output_dir).await?;
+
+            BuiltDistributions::Wheel(wheel)
+        }
     };
 
     Ok(assets)
@@ -335,4 +402,7 @@ enum BuildPlan {
 
     /// Build a source distribution and a wheel from source.
     SdistAndWheel,
+
+    /// Build a wheel from a source distribution.
+    WheelFromSdist,
 }
