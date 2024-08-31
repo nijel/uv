@@ -335,6 +335,21 @@ pub enum Commands {
         after_long_help = ""
     )]
     Venv(VenvArgs),
+    /// Build Python packages into source distributions and wheels.
+    ///
+    /// By default, `uv build` will build a source distribution ("sdist")
+    /// from the source directory, and a binary distribution ("wheel") from
+    /// the source distribution.
+    ///
+    /// `uv build --sdist` can be used to build only the source distribution,
+    /// `uv build --wheel` can be used to build only the binary distribution,
+    /// and `uv build --sdist --wheel` can be used to build both distributions
+    /// from source.
+    #[command(
+        after_help = "Use `uv help build` for more details.",
+        after_long_help = ""
+    )]
+    Build(BuildArgs),
     /// Manage uv's cache.
     #[command(
         after_help = "Use `uv help cache` for more details.",
@@ -1125,7 +1140,7 @@ pub struct PipSyncArgs {
 
     /// The Python interpreter into which packages should be installed.
     ///
-    /// By default, syncing requires a virtual environment. An path to an
+    /// By default, syncing requires a virtual environment. A path to an
     /// alternative Python can be provided, but it is only recommended in
     /// continuous integration (CI) environments and should be used with
     /// caution, as it can modify the system Python installation.
@@ -1407,7 +1422,7 @@ pub struct PipInstallArgs {
 
     /// The Python interpreter into which packages should be installed.
     ///
-    /// By default, installation requires a virtual environment. An path to an
+    /// By default, installation requires a virtual environment. A path to an
     /// alternative Python can be provided, but it is only recommended in
     /// continuous integration (CI) environments and should be used with
     /// caution, as it can modify the system Python installation.
@@ -1572,7 +1587,7 @@ pub struct PipUninstallArgs {
 
     /// The Python interpreter from which packages should be uninstalled.
     ///
-    /// By default, uninstallation requires a virtual environment. An path to an
+    /// By default, uninstallation requires a virtual environment. A path to an
     /// alternative Python can be provided, but it is only recommended in
     /// continuous integration (CI) environments and should be used with
     /// caution, as it can modify the system Python installation.
@@ -1921,6 +1936,49 @@ pub struct PipTreeArgs {
 
     #[command(flatten)]
     pub compat_args: compat::PipGlobalCompatArgs,
+}
+
+#[derive(Args)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct BuildArgs {
+    /// The directory from which source distributions and/or wheels should be built.
+    ///
+    /// Defaults to the current working directory.
+    #[arg(value_parser = parse_file_path)]
+    pub src_dir: Option<PathBuf>,
+
+    /// Build a source distribution ("sdist") from the given directory.
+    #[arg(long)]
+    pub sdist: bool,
+
+    /// Build a built distribution ("wheel") from the given directory.
+    #[arg(long)]
+    pub wheel: bool,
+
+    /// The Python interpreter to use for the build environment.
+    ///
+    /// By default, builds are executed in isolated virtual environments. The
+    /// discovered interpreter will be used to create those environments, and
+    /// will be symlinked or copied in depending on the platform.
+    ///
+    /// See `uv help python` to view supported request formats.
+    #[arg(
+        long,
+        short,
+        env = "UV_PYTHON",
+        verbatim_doc_comment,
+        help_heading = "Python options"
+    )]
+    pub python: Option<String>,
+
+    #[command(flatten)]
+    pub resolver: ResolverArgs,
+
+    #[command(flatten)]
+    pub build: BuildOptionsArgs,
+
+    #[command(flatten)]
+    pub refresh: RefreshArgs,
 }
 
 #[derive(Args)]
@@ -2298,7 +2356,7 @@ pub struct RunArgs {
     pub installer: ResolverInstallerArgs,
 
     #[command(flatten)]
-    pub build: BuildArgs,
+    pub build: BuildOptionsArgs,
 
     #[command(flatten)]
     pub refresh: RefreshArgs,
@@ -2426,7 +2484,7 @@ pub struct SyncArgs {
     pub installer: ResolverInstallerArgs,
 
     #[command(flatten)]
-    pub build: BuildArgs,
+    pub build: BuildOptionsArgs,
 
     #[command(flatten)]
     pub refresh: RefreshArgs,
@@ -2479,7 +2537,7 @@ pub struct LockArgs {
     pub resolver: ResolverArgs,
 
     #[command(flatten)]
-    pub build: BuildArgs,
+    pub build: BuildOptionsArgs,
 
     #[command(flatten)]
     pub refresh: RefreshArgs,
@@ -2593,7 +2651,7 @@ pub struct AddArgs {
     pub installer: ResolverInstallerArgs,
 
     #[command(flatten)]
-    pub build: BuildArgs,
+    pub build: BuildOptionsArgs,
 
     #[command(flatten)]
     pub refresh: RefreshArgs,
@@ -2662,7 +2720,7 @@ pub struct RemoveArgs {
     pub installer: ResolverInstallerArgs,
 
     #[command(flatten)]
-    pub build: BuildArgs,
+    pub build: BuildOptionsArgs,
 
     #[command(flatten)]
     pub refresh: RefreshArgs,
@@ -2722,7 +2780,7 @@ pub struct TreeArgs {
     pub frozen: bool,
 
     #[command(flatten)]
-    pub build: BuildArgs,
+    pub build: BuildOptionsArgs,
 
     #[command(flatten)]
     pub resolver: ResolverArgs,
@@ -2819,7 +2877,7 @@ pub struct ExportArgs {
     pub resolver: ResolverArgs,
 
     #[command(flatten)]
-    pub build: BuildArgs,
+    pub build: BuildOptionsArgs,
 
     #[command(flatten)]
     pub refresh: RefreshArgs,
@@ -2966,7 +3024,7 @@ pub struct ToolRunArgs {
     pub installer: ResolverInstallerArgs,
 
     #[command(flatten)]
-    pub build: BuildArgs,
+    pub build: BuildOptionsArgs,
 
     #[command(flatten)]
     pub refresh: RefreshArgs,
@@ -3018,7 +3076,7 @@ pub struct ToolInstallArgs {
     pub installer: ResolverInstallerArgs,
 
     #[command(flatten)]
-    pub build: BuildArgs,
+    pub build: BuildOptionsArgs,
 
     #[command(flatten)]
     pub refresh: RefreshArgs,
@@ -3103,7 +3161,7 @@ pub struct ToolUpgradeArgs {
     pub installer: ResolverInstallerArgs,
 
     #[command(flatten)]
-    pub build: BuildArgs,
+    pub build: BuildOptionsArgs,
 }
 
 #[derive(Args)]
@@ -3407,7 +3465,7 @@ pub struct RefreshArgs {
 
 #[derive(Args)]
 #[allow(clippy::struct_excessive_bools)]
-pub struct BuildArgs {
+pub struct BuildOptionsArgs {
     /// Don't build source distributions.
     ///
     /// When enabled, resolving will not run arbitrary Python code. The cached wheels of
