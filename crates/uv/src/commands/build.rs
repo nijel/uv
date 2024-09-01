@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use uv_auth::store_credentials_from_url;
 use uv_cache::Cache;
 use uv_client::{BaseClientBuilder, Connectivity, FlatIndexClient, RegistryClientBuilder};
-use uv_configuration::{BuildKind, Concurrency};
+use uv_configuration::{BuildKind, BuildOutput, Concurrency};
 use uv_dispatch::BuildDispatch;
 use uv_fs::{Simplified, CWD};
 use uv_python::{
@@ -59,16 +59,15 @@ pub(crate) async fn build(
 
     match assets {
         BuiltDistributions::Wheel(wheel) => {
-            anstream::eprintln!("Successfully built {}", wheel.bold().cyan());
+            anstream::eprintln!("{}", format!("Successfully built {}", wheel.cyan()).bold());
         }
         BuiltDistributions::Sdist(sdist) => {
-            anstream::eprintln!("Successfully built {}", sdist.bold().cyan());
+            anstream::eprintln!("{}", format!("Successfully built {}", sdist.cyan()).bold());
         }
         BuiltDistributions::Both(sdist, wheel) => {
             anstream::eprintln!(
-                "Successfully built {} and {}",
-                sdist.bold().cyan(),
-                wheel.bold().cyan()
+                "{}",
+                format!("Successfully built {} and {}", sdist.cyan(), wheel.cyan()).bold()
             );
         }
     }
@@ -279,9 +278,18 @@ async fn build_impl(
 
     let assets = match plan {
         BuildPlan::SdistToWheel => {
+            anstream::eprintln!("{}", "Building source distribution...".bold());
+
             // Build the sdist.
             let builder = build_dispatch
-                .setup_build(path, subdirectory, &version_id, dist, BuildKind::Sdist)
+                .setup_build(
+                    path,
+                    subdirectory,
+                    &version_id,
+                    dist,
+                    BuildKind::Sdist,
+                    BuildOutput::Stderr,
+                )
                 .await?;
             let sdist = builder.build(&output_dir).await?;
 
@@ -301,6 +309,8 @@ async fn build_impl(
                 Err(err) => return Err(err.into()),
             };
 
+            anstream::eprintln!("{}", "Building wheel from source distribution...".bold());
+
             // Build a wheel from the source distribution.
             let builder = build_dispatch
                 .setup_build(
@@ -309,6 +319,7 @@ async fn build_impl(
                     &version_id,
                     dist,
                     BuildKind::Wheel,
+                    BuildOutput::Stderr,
                 )
                 .await?;
             let wheel = builder.build(&output_dir).await?;
@@ -316,35 +327,71 @@ async fn build_impl(
             BuiltDistributions::Both(sdist, wheel)
         }
         BuildPlan::Sdist => {
+            anstream::eprintln!("{}", "Building source distribution...".bold());
+
             let builder = build_dispatch
-                .setup_build(path, subdirectory, &version_id, dist, BuildKind::Sdist)
+                .setup_build(
+                    path,
+                    subdirectory,
+                    &version_id,
+                    dist,
+                    BuildKind::Sdist,
+                    BuildOutput::Stderr,
+                )
                 .await?;
             let sdist = builder.build(&output_dir).await?;
 
             BuiltDistributions::Sdist(sdist)
         }
         BuildPlan::Wheel => {
+            anstream::eprintln!("{}", "Building wheel...".bold());
+
             let builder = build_dispatch
-                .setup_build(path, subdirectory, &version_id, dist, BuildKind::Wheel)
+                .setup_build(
+                    path,
+                    subdirectory,
+                    &version_id,
+                    dist,
+                    BuildKind::Wheel,
+                    BuildOutput::Stderr,
+                )
                 .await?;
             let wheel = builder.build(&output_dir).await?;
 
             BuiltDistributions::Wheel(wheel)
         }
         BuildPlan::SdistAndWheel => {
+            anstream::eprintln!("{}", "Building source distribution...".bold());
             let builder = build_dispatch
-                .setup_build(path, subdirectory, &version_id, dist, BuildKind::Sdist)
+                .setup_build(
+                    path,
+                    subdirectory,
+                    &version_id,
+                    dist,
+                    BuildKind::Sdist,
+                    BuildOutput::Stderr,
+                )
                 .await?;
             let sdist = builder.build(&output_dir).await?;
 
+            anstream::eprintln!("{}", "Building wheel...".bold());
             let builder = build_dispatch
-                .setup_build(path, subdirectory, &version_id, dist, BuildKind::Wheel)
+                .setup_build(
+                    path,
+                    subdirectory,
+                    &version_id,
+                    dist,
+                    BuildKind::Wheel,
+                    BuildOutput::Stderr,
+                )
                 .await?;
             let wheel = builder.build(&output_dir).await?;
 
             BuiltDistributions::Both(sdist, wheel)
         }
         BuildPlan::WheelFromSdist => {
+            anstream::eprintln!("{}", "Building source distribution from wheel...".bold());
+
             // Extract the source distribution into a temporary directory.
             let reader = fs_err::tokio::File::open(path).await?;
             let ext = SourceDistExtension::from_path(path).map_err(|err| {
@@ -368,6 +415,7 @@ async fn build_impl(
                     &version_id,
                     dist,
                     BuildKind::Wheel,
+                    BuildOutput::Stderr,
                 )
                 .await?;
             let wheel = builder.build(&output_dir).await?;
